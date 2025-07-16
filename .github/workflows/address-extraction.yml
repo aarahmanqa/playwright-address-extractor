@@ -36,9 +36,8 @@ jobs:
 
           echo "total_shards=$TOTAL_SHARDS" >> $GITHUB_OUTPUT
 
-          # Create matrix array [0, 1, 2, ..., TOTAL_SHARDS-1]
-          MATRIX=$(seq 0 $((TOTAL_SHARDS-1)) | jq -R . | jq -s .)
-          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+          # Create matrix array using Python instead of jq
+          python3 -c "import json; total_shards = int('$TOTAL_SHARDS'); matrix = list(range(total_shards)); print('matrix=' + json.dumps(matrix))" >> $GITHUB_OUTPUT
 
           echo "🔧 Configuration:"
           echo "  - Total Shards: $TOTAL_SHARDS"
