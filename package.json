@@ -6,8 +6,10 @@
   "scripts": {
     "install-deps": "npm install",
     "test": "npx playwright test --workers=3",
+    "test-sharded": "npx playwright test tests/MyScript.spec.ts --workers=4",
     "extract": "npx ts-node src/extractor.ts",
     "extract-sample": "npx ts-node src/extractor.ts --sample",
+    "extract-local-sharded": "./run-local-sharded.sh",
     "setup": "npx playwright install chromium"
   },
   "keywords": ["playwright", "google-maps", "address-extraction"],

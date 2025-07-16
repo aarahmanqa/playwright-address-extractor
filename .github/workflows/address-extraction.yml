@@ -1,0 +1,212 @@
+name: Address Extraction with Sharding
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_state:
+        description: 'Target state(s) to process (e.g., "ALL", "CA", or "CA,NY,TX")'
+        required: false
+        default: 'ALL'
+      total_shards:
+        description: 'Number of parallel shards (1-50)'
+        required: false
+        default: '20'
+      max_records_per_shard:
+        description: 'Maximum records per shard (500-2000)'
+        required: false
+        default: '1000'
+
+env:
+  NODE_VERSION: '18'
+  PLAYWRIGHT_BROWSERS_PATH: 0
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      total_shards: ${{ steps.set-matrix.outputs.total_shards }}
+    steps:
+      - name: Set up matrix
+        id: set-matrix
+        run: |
+          TOTAL_SHARDS=${{ github.event.inputs.total_shards || '20' }}
+          echo "total_shards=$TOTAL_SHARDS" >> $GITHUB_OUTPUT
+          
+          # Create matrix array [0, 1, 2, ..., TOTAL_SHARDS-1]
+          MATRIX=$(seq 0 $((TOTAL_SHARDS-1)) | jq -R . | jq -s .)
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+          
+          echo "🔧 Configuration:"
+          echo "  - Total Shards: $TOTAL_SHARDS"
+          echo "  - Target State: ${{ github.event.inputs.target_state || 'ALL' }}"
+          echo "  - Max Records per Shard: ${{ github.event.inputs.max_records_per_shard || '1000' }}"
+
+  extract-addresses:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 120  # 2 hours timeout per shard
+    strategy:
+      fail-fast: false  # Continue other shards even if one fails
+      matrix:
+        shard_index: ${{ fromJson(needs.setup.outputs.matrix) }}
+    
+    env:
+      SHARD_INDEX: ${{ matrix.shard_index }}
+      TOTAL_SHARDS: ${{ needs.setup.outputs.total_shards }}
+      MAX_RECORDS_PER_SHARD: ${{ github.event.inputs.max_records_per_shard || '1000' }}
+      CI: true
+      
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npx playwright install chromium --with-deps
+
+      - name: Configure target state
+        run: |
+          TARGET_STATE="${{ github.event.inputs.target_state || 'ALL' }}"
+          echo "🎯 Configuring target state: $TARGET_STATE"
+          
+          # Update the test file with the target state
+          if [ "$TARGET_STATE" != "ALL" ]; then
+            # Handle multiple states (comma-separated)
+            if [[ "$TARGET_STATE" == *","* ]]; then
+              # Convert "CA,NY,TX" to ["CA", "NY", "TX"]
+              FORMATTED_STATE="[$(echo "$TARGET_STATE" | sed 's/,/", "/g' | sed 's/^/"/' | sed 's/$/"/')"]"
+            else
+              # Single state
+              FORMATTED_STATE="\"$TARGET_STATE\""
+            fi
+            
+            sed -i "s/const TARGET_STATE: string | string\[\] = 'ALL';/const TARGET_STATE: string | string[] = $FORMATTED_STATE;/" tests/MyScript.spec.ts
+          fi
+
+      - name: Run address extraction (Shard ${{ matrix.shard_index }})
+        run: |
+          echo "🚀 Starting shard ${{ matrix.shard_index }}/${{ needs.setup.outputs.total_shards }}"
+          echo "📊 Processing up to ${{ env.MAX_RECORDS_PER_SHARD }} records in this shard"
+          
+          # Run with increased workers and optimized settings for CI
+          npx playwright test tests/MyScript.spec.ts \
+            --workers=4 \
+            --timeout=180000 \
+            --retries=2 \
+            --reporter=list \
+            --output=test-results-shard-${{ matrix.shard_index }}
+
+      - name: Upload shard results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shard-${{ matrix.shard_index }}-results
+          path: |
+            FinalZipcodeState_shard_${{ matrix.shard_index }}.csv
+            test-results-shard-${{ matrix.shard_index }}/
+          retention-days: 30
+
+      - name: Upload shard logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: shard-${{ matrix.shard_index }}-logs
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+
+  merge-results:
+    needs: [setup, extract-addresses]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Download all shard results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: shard-*-results
+          merge-multiple: true
+
+      - name: Merge CSV results
+        run: |
+          echo "🔄 Merging results from ${{ needs.setup.outputs.total_shards }} shards..."
+          
+          # Create merged file with header
+          echo "zipcode,state,address,city" > FinalZipcodeState_merged.csv
+          
+          # Merge all shard files
+          MERGED_COUNT=0
+          for i in $(seq 0 $(({{ needs.setup.outputs.total_shards }}-1))); do
+            SHARD_FILE="FinalZipcodeState_shard_${i}.csv"
+            if [ -f "$SHARD_FILE" ]; then
+              # Skip header and append data
+              tail -n +2 "$SHARD_FILE" >> FinalZipcodeState_merged.csv
+              SHARD_COUNT=$(tail -n +2 "$SHARD_FILE" | wc -l)
+              MERGED_COUNT=$((MERGED_COUNT + SHARD_COUNT))
+              echo "✅ Merged shard $i: $SHARD_COUNT records"
+            else
+              echo "⚠️ Shard file $SHARD_FILE not found"
+            fi
+          done
+          
+          echo "📊 Total merged records: $MERGED_COUNT"
+          echo "📁 Final file: FinalZipcodeState_merged.csv"
+
+      - name: Generate summary report
+        run: |
+          echo "📈 Generating extraction summary..."
+          
+          TOTAL_RECORDS=$(tail -n +2 FinalZipcodeState_merged.csv | wc -l)
+          SUCCESSFUL_RECORDS=$(tail -n +2 FinalZipcodeState_merged.csv | grep -v "Not Found\|Error" | wc -l)
+          NOT_FOUND_RECORDS=$(tail -n +2 FinalZipcodeState_merged.csv | grep "Not Found" | wc -l)
+          ERROR_RECORDS=$(tail -n +2 FinalZipcodeState_merged.csv | grep "Error" | wc -l)
+          SUCCESS_RATE=$(echo "scale=2; $SUCCESSFUL_RECORDS * 100 / $TOTAL_RECORDS" | bc -l)
+          
+          cat > extraction_summary.md << EOF
+          # Address Extraction Summary
+          
+          ## Configuration
+          - **Target State(s)**: ${{ github.event.inputs.target_state || 'ALL' }}
+          - **Total Shards**: ${{ needs.setup.outputs.total_shards }}
+          - **Max Records per Shard**: ${{ github.event.inputs.max_records_per_shard || '1000' }}
+          
+          ## Results
+          - **Total Records Processed**: $TOTAL_RECORDS
+          - **Successful Extractions**: $SUCCESSFUL_RECORDS ($SUCCESS_RATE%)
+          - **Not Found**: $NOT_FOUND_RECORDS
+          - **Errors**: $ERROR_RECORDS
+          
+          ## Files Generated
+          - \`FinalZipcodeState_merged.csv\` - Complete merged results
+          - Individual shard files: \`FinalZipcodeState_shard_*.csv\`
+          EOF
+          
+          cat extraction_summary.md
+
+      - name: Upload final results
+        uses: actions/upload-artifact@v4
+        with:
+          name: final-merged-results
+          path: |
+            FinalZipcodeState_merged.csv
+            extraction_summary.md
+            FinalZipcodeState_shard_*.csv
+          retention-days: 90
+
+      - name: Comment on workflow run
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          echo "🎉 Address extraction completed!"
+          echo "📁 Download the 'final-merged-results' artifact to get your complete dataset."
+          echo "📊 Check the extraction_summary.md for detailed statistics."

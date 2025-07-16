@@ -8,6 +8,12 @@ import { writeFileSync, existsSync, readFileSync } from 'fs';
 // const TARGET_STATE: string | string[] = 'ALL';          // All states
 const TARGET_STATE: string | string[] = 'ALL'; // Change this to run for specific state(s) or 'ALL' for all states
 
+// GitHub Actions sharding configuration
+const SHARD_INDEX = parseInt(process.env.SHARD_INDEX || '0');
+const TOTAL_SHARDS = parseInt(process.env.TOTAL_SHARDS || '1');
+const IS_CI = process.env.CI === 'true';
+const MAX_RECORDS_PER_SHARD = parseInt(process.env.MAX_RECORDS_PER_SHARD || '1000'); // Limit per shard for efficiency
+
 // Search types in order of preference
 const SEARCH_TYPES = [
   'post office',
@@ -104,7 +110,8 @@ function isValidCity(city: string | null | undefined): boolean {
 
 // Function to update data in FinalZipcodeState.csv file
 function updateFinalCSV(zipcode: string, state: string, addressLine: string, city: string) {
-  const csvFilePath = 'FinalZipcodeState.csv';
+  // Use sharded output file in CI mode, regular file locally
+  const csvFilePath = TOTAL_SHARDS > 1 ? `FinalZipcodeState_shard_${SHARD_INDEX}.csv` : 'FinalZipcodeState.csv';
 
   if (!existsSync(csvFilePath)) {
     console.error(`❌ CSV file not found: ${csvFilePath}`);
@@ -225,8 +232,27 @@ function readZipCodesFromCSV(): { zipcode: string, state: string }[] {
 
   console.log(`📖 Found ${noAddressRecords.length} ZIP codes without address/city data`);
 
+  // Apply sharding for GitHub Actions
+  let finalRecords = noAddressRecords;
+  if (TOTAL_SHARDS > 1) {
+    const recordsPerShard = Math.ceil(noAddressRecords.length / TOTAL_SHARDS);
+    const startIndex = SHARD_INDEX * recordsPerShard;
+    const endIndex = Math.min(startIndex + recordsPerShard, noAddressRecords.length);
+
+    // Apply max records per shard limit for efficiency
+    const maxEndIndex = Math.min(startIndex + MAX_RECORDS_PER_SHARD, endIndex);
+
+    finalRecords = noAddressRecords.slice(startIndex, maxEndIndex);
+
+    console.log(`🔀 Shard ${SHARD_INDEX + 1}/${TOTAL_SHARDS}: Processing records ${startIndex + 1}-${maxEndIndex} (${finalRecords.length} records)`);
+
+    if (IS_CI) {
+      console.log(`🤖 Running in CI mode with optimized settings`);
+    }
+  }
+
   // Return only zipcode and state for compatibility with the rest of the code
-  return noAddressRecords.map(item => ({ zipcode: item.zipcode, state: item.state }));
+  return finalRecords.map(item => ({ zipcode: item.zipcode, state: item.state }));
 }
 
 // Function to search for a specific type of location
@@ -327,7 +353,14 @@ async function processZipCode(page: any, zipcode: string, state: string) {
 
 // Function to initialize CSV with proper headers
 function initializeCSVHeaders() {
-  const csvFilePath = 'FinalZipcodeState.csv';
+  const csvFilePath = TOTAL_SHARDS > 1 ? `FinalZipcodeState_shard_${SHARD_INDEX}.csv` : 'FinalZipcodeState.csv';
+
+  // For sharded processing, create a new file with just the header if it doesn't exist
+  if (TOTAL_SHARDS > 1 && !existsSync(csvFilePath)) {
+    writeFileSync(csvFilePath, 'zipcode,state,address,city\n');
+    console.log(`📝 Created new shard file: ${csvFilePath}`);
+    return;
+  }
 
   if (!existsSync(csvFilePath)) {
     console.error(`❌ CSV file not found: ${csvFilePath}`);
