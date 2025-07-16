@@ -1,3 +1,49 @@
-node_modules
-playwright-report
-test-results
+# Dependencies
+node_modules/
+package-lock.json
+
+# Playwright outputs
+playwright-report/
+test-results/
+test-results-shard-*/
+
+# Logs
+logs/
+*.log
+
+# Temporary and test files
+test_sample.csv
+test-dry-run.js
+test-sharding.sh
+
+# Backup files
+backups/
+*.backup
+*.tmp
+
+# Shard output files (generated during execution)
+*_shard_*.csv
+FinalZipcodeState_merged.csv
+sample_addresses*.csv
+extraction_summary.md
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Environment files
+.env
+.env.local
+.env.*.local

@@ -8,9 +8,9 @@ on:
         required: false
         default: 'ALL'
       total_shards:
-        description: 'Number of parallel shards (1-50)'
+        description: 'Number of parallel shards (1-50) - Use 42+ for 100% coverage with 1000 records/shard'
         required: false
-        default: '20'
+        default: '45'
       max_records_per_shard:
         description: 'Maximum records per shard (500-2000)'
         required: false
@@ -30,17 +30,18 @@ jobs:
       - name: Set up matrix
         id: set-matrix
         run: |
-          TOTAL_SHARDS=${{ github.event.inputs.total_shards || '20' }}
+          TOTAL_SHARDS=${{ github.event.inputs.total_shards || '45' }}
           echo "total_shards=$TOTAL_SHARDS" >> $GITHUB_OUTPUT
-          
+
           # Create matrix array [0, 1, 2, ..., TOTAL_SHARDS-1]
           MATRIX=$(seq 0 $((TOTAL_SHARDS-1)) | jq -R . | jq -s .)
           echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
-          
+
           echo "🔧 Configuration:"
           echo "  - Total Shards: $TOTAL_SHARDS"
           echo "  - Target State: ${{ github.event.inputs.target_state || 'ALL' }}"
           echo "  - Max Records per Shard: ${{ github.event.inputs.max_records_per_shard || '1000' }}"
+          echo "  - Expected Coverage: ~$((TOTAL_SHARDS * ${{ github.event.inputs.max_records_per_shard || '1000' }})) records"
 
   extract-addresses:
     needs: setup

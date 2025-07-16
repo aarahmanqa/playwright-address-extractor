@@ -239,15 +239,21 @@ function readZipCodesFromCSV(): { zipcode: string, state: string }[] {
     const startIndex = SHARD_INDEX * recordsPerShard;
     const endIndex = Math.min(startIndex + recordsPerShard, noAddressRecords.length);
 
-    // Apply max records per shard limit for efficiency
-    const maxEndIndex = Math.min(startIndex + MAX_RECORDS_PER_SHARD, endIndex);
+    // Apply max records per shard limit for efficiency, but ensure we don't skip records
+    const actualEndIndex = Math.min(endIndex, startIndex + MAX_RECORDS_PER_SHARD);
 
-    finalRecords = noAddressRecords.slice(startIndex, maxEndIndex);
+    finalRecords = noAddressRecords.slice(startIndex, actualEndIndex);
 
-    console.log(`🔀 Shard ${SHARD_INDEX + 1}/${TOTAL_SHARDS}: Processing records ${startIndex + 1}-${maxEndIndex} (${finalRecords.length} records)`);
+    console.log(`🔀 Shard ${SHARD_INDEX + 1}/${TOTAL_SHARDS}: Processing records ${startIndex + 1}-${actualEndIndex} (${finalRecords.length} records)`);
+    console.log(`📊 Total records available: ${noAddressRecords.length}, This shard range: ${startIndex}-${actualEndIndex-1}`);
 
     if (IS_CI) {
       console.log(`🤖 Running in CI mode with optimized settings`);
+    }
+
+    // Warn if we're not processing all records due to MAX_RECORDS_PER_SHARD limit
+    if (actualEndIndex < endIndex) {
+      console.log(`⚠️ Limiting to ${MAX_RECORDS_PER_SHARD} records per shard. Increase MAX_RECORDS_PER_SHARD or add more shards to process all data.`);
     }
   }
 
@@ -436,7 +442,7 @@ console.log(`🔧 Total ZIP codes to process (without existing addresses): ${zip
 // Create individual test cases for parallel execution
 for (let i = 0; i < zipCodes.length; i++) {
   const { zipcode, state } = zipCodes[i];
-  test(`Extract address for ${zipcode}, ${state}`, async ({ page }) => {
+  test(`Extract address for ${zipcode}, ${state} [${i}]`, async ({ page }) => {
     await processZipCode(page, zipcode, state);
   });
 }
