@@ -88,6 +88,10 @@ jobs:
           # Update the test file with the target state
           if [ "$TARGET_STATE" != "ALL" ]; then
             echo "🔧 Updating target state to: $TARGET_STATE"
+
+            # Create a temporary file with the replacement
+            cp tests/MyScript.spec.ts tests/MyScript.spec.ts.backup
+
             # Handle multiple states (comma-separated)
             if [[ "$TARGET_STATE" == *","* ]]; then
               # Convert "CA,NY,TX" to ["CA", "NY", "TX"]
@@ -98,12 +102,18 @@ jobs:
             fi
 
             # Show current line before replacement
+            echo "📋 Before replacement:"
             grep "const TARGET_STATE" tests/MyScript.spec.ts
 
-            # Replace the target state
-            sed -i "s/const TARGET_STATE: string | string\[\] = 'ALL';/const TARGET_STATE: string | string[] = $FORMATTED_STATE;/" tests/MyScript.spec.ts
+            # Use a more robust replacement method with proper escaping
+            # First, escape any special characters in FORMATTED_STATE for sed
+            ESCAPED_STATE=$(printf '%s\n' "$FORMATTED_STATE" | sed 's/[[\.*^$()+?{|]/\\&/g')
+
+            # Use a different delimiter to avoid quote conflicts
+            sed -i "s|const TARGET_STATE: string | string\[\] = 'ALL';|const TARGET_STATE: string | string[] = $ESCAPED_STATE;|" tests/MyScript.spec.ts
 
             # Show line after replacement
+            echo "📋 After replacement:"
             grep "const TARGET_STATE" tests/MyScript.spec.ts
           fi
 
