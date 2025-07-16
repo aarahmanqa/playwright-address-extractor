@@ -92,25 +92,33 @@ jobs:
             # Create a temporary file with the replacement
             cp tests/MyScript.spec.ts tests/MyScript.spec.ts.backup
 
-            # Handle multiple states (comma-separated)
-            if [[ "$TARGET_STATE" == *","* ]]; then
-              # Convert "CA,NY,TX" to ["CA", "NY", "TX"]
-              FORMATTED_STATE="[$(echo "$TARGET_STATE" | sed 's/,/", "/g' | sed 's/^/"/' | sed 's/$/"/')"]"
-            else
-              # Single state
-              FORMATTED_STATE="\"$TARGET_STATE\""
-            fi
-
             # Show current line before replacement
             echo "📋 Before replacement:"
             grep "const TARGET_STATE" tests/MyScript.spec.ts
 
-            # Use a more robust replacement method with proper escaping
-            # First, escape any special characters in FORMATTED_STATE for sed
-            ESCAPED_STATE=$(printf '%s\n' "$FORMATTED_STATE" | sed 's/[[\.*^$()+?{|]/\\&/g')
+            # Use a simple file replacement approach
+            if [[ "$TARGET_STATE" == *","* ]]; then
+              # Multiple states: convert "CA,NY,TX" to ["CA", "NY", "TX"]
+              IFS=',' read -ra STATES <<< "$TARGET_STATE"
+              FORMATTED_STATES=""
+              for state in "${STATES[@]}"; do
+                if [ -z "$FORMATTED_STATES" ]; then
+                  FORMATTED_STATES="\"$state\""
+                else
+                  FORMATTED_STATES="$FORMATTED_STATES, \"$state\""
+                fi
+              done
+              NEW_LINE="const TARGET_STATE: string | string[] = [$FORMATTED_STATES];"
+            else
+              # Single state
+              NEW_LINE="const TARGET_STATE: string | string[] = \"$TARGET_STATE\";"
+            fi
 
-            # Use a different delimiter to avoid quote conflicts
-            sed -i "s|const TARGET_STATE: string | string\[\] = 'ALL';|const TARGET_STATE: string | string[] = $ESCAPED_STATE;|" tests/MyScript.spec.ts
+            # Replace the line using awk to avoid sed escaping issues
+            awk -v new_line="$NEW_LINE" '
+              /const TARGET_STATE: string \| string\[\] = '\''ALL'\'';/ { print new_line; next }
+              { print }
+            ' tests/MyScript.spec.ts.backup > tests/MyScript.spec.ts
 
             # Show line after replacement
             echo "📋 After replacement:"
