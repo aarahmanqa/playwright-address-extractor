@@ -41,7 +41,9 @@ jobs:
           echo "  - Total Shards: $TOTAL_SHARDS"
           echo "  - Target State: ${{ github.event.inputs.target_state || 'ALL' }}"
           echo "  - Max Records per Shard: ${{ github.event.inputs.max_records_per_shard || '1000' }}"
-          echo "  - Expected Coverage: ~$((TOTAL_SHARDS * ${{ github.event.inputs.max_records_per_shard || '1000' }})) records"
+
+          MAX_RECORDS=${{ github.event.inputs.max_records_per_shard || '1000' }}
+          echo "  - Expected Coverage: ~$((TOTAL_SHARDS * MAX_RECORDS)) records"
 
   extract-addresses:
     needs: setup
@@ -77,9 +79,15 @@ jobs:
         run: |
           TARGET_STATE="${{ github.event.inputs.target_state || 'ALL' }}"
           echo "🎯 Configuring target state: $TARGET_STATE"
-          
+
+          # Verify files exist
+          echo "📁 Checking files:"
+          ls -la tests/MyScript.spec.ts
+          ls -la FinalZipcodeState.csv
+
           # Update the test file with the target state
           if [ "$TARGET_STATE" != "ALL" ]; then
+            echo "🔧 Updating target state to: $TARGET_STATE"
             # Handle multiple states (comma-separated)
             if [[ "$TARGET_STATE" == *","* ]]; then
               # Convert "CA,NY,TX" to ["CA", "NY", "TX"]
@@ -88,15 +96,33 @@ jobs:
               # Single state
               FORMATTED_STATE="\"$TARGET_STATE\""
             fi
-            
+
+            # Show current line before replacement
+            grep "const TARGET_STATE" tests/MyScript.spec.ts
+
+            # Replace the target state
             sed -i "s/const TARGET_STATE: string | string\[\] = 'ALL';/const TARGET_STATE: string | string[] = $FORMATTED_STATE;/" tests/MyScript.spec.ts
+
+            # Show line after replacement
+            grep "const TARGET_STATE" tests/MyScript.spec.ts
           fi
 
       - name: Run address extraction (Shard ${{ matrix.shard_index }})
         run: |
           echo "🚀 Starting shard ${{ matrix.shard_index }}/${{ needs.setup.outputs.total_shards }}"
           echo "📊 Processing up to ${{ env.MAX_RECORDS_PER_SHARD }} records in this shard"
-          
+
+          # Debug environment variables
+          echo "🔍 Environment variables:"
+          echo "  SHARD_INDEX: ${{ matrix.shard_index }}"
+          echo "  TOTAL_SHARDS: ${{ needs.setup.outputs.total_shards }}"
+          echo "  MAX_RECORDS_PER_SHARD: ${{ env.MAX_RECORDS_PER_SHARD }}"
+          echo "  CI: ${{ env.CI }}"
+
+          # Test if we can list tests first
+          echo "📋 Listing available tests:"
+          npx playwright test tests/MyScript.spec.ts --list --reporter=line | head -10 || echo "Failed to list tests"
+
           # Run with increased workers and optimized settings for CI
           npx playwright test tests/MyScript.spec.ts \
             --workers=4 \
