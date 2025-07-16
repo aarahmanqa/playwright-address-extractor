@@ -1,0 +1,100 @@
+name: Simple Test Workflow
+
+on:
+  workflow_dispatch:
+    inputs:
+      test_shards:
+        description: 'Number of test shards (1-5)'
+        required: false
+        default: '2'
+
+env:
+  NODE_VERSION: '18'
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+      total_shards: ${{ steps.set-matrix.outputs.total_shards }}
+    steps:
+      - name: Set up matrix
+        id: set-matrix
+        run: |
+          TOTAL_SHARDS="${{ github.event.inputs.test_shards || '2' }}"
+          echo "total_shards=$TOTAL_SHARDS" >> $GITHUB_OUTPUT
+          
+          # Create matrix array [0, 1, 2, ..., TOTAL_SHARDS-1]
+          MATRIX=$(seq 0 $((TOTAL_SHARDS-1)) | jq -R . | jq -s .)
+          echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+          
+          echo "🔧 Test Configuration:"
+          echo "  - Total Shards: $TOTAL_SHARDS"
+          echo "  - Matrix: $MATRIX"
+
+  test-shards:
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        shard_index: ${{ fromJson(needs.setup.outputs.matrix) }}
+    
+    env:
+      SHARD_INDEX: ${{ matrix.shard_index }}
+      TOTAL_SHARDS: ${{ needs.setup.outputs.total_shards }}
+      MAX_RECORDS_PER_SHARD: 10
+      CI: true
+      
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npx playwright install chromium --with-deps
+
+      - name: Debug environment
+        run: |
+          echo "🔍 Environment variables:"
+          echo "  SHARD_INDEX: $SHARD_INDEX"
+          echo "  TOTAL_SHARDS: $TOTAL_SHARDS"
+          echo "  MAX_RECORDS_PER_SHARD: $MAX_RECORDS_PER_SHARD"
+          echo "  CI: $CI"
+          
+          echo "📁 Files:"
+          ls -la tests/MyScript.spec.ts
+          ls -la FinalZipcodeState.csv
+          
+          echo "📋 Test discovery:"
+          npx playwright test tests/MyScript.spec.ts --list --reporter=line | head -5
+
+      - name: Run simple test (Shard ${{ matrix.shard_index }})
+        run: |
+          echo "🚀 Running shard ${{ matrix.shard_index }}/${{ needs.setup.outputs.total_shards }}"
+          
+          # Run with minimal settings for testing
+          npx playwright test tests/MyScript.spec.ts \
+            --workers=1 \
+            --timeout=60000 \
+            --retries=0 \
+            --reporter=list \
+            --max-failures=5
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-shard-${{ matrix.shard_index }}-results
+          path: |
+            FinalZipcodeState_shard_${{ matrix.shard_index }}.csv
+            test-results/
+          retention-days: 7
