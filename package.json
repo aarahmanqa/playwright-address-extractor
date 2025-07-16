@@ -1,0 +1,28 @@
+{
+  "name": "google-maps-address-extractor",
+  "version": "1.0.0",
+  "description": "Extract petrol bunk addresses from Google Maps using Playwright",
+  "main": "index.js",
+  "scripts": {
+    "install-deps": "npm install",
+    "test": "npx playwright test --workers=3",
+    "extract": "npx ts-node src/extractor.ts",
+    "extract-sample": "npx ts-node src/extractor.ts --sample",
+    "setup": "npx playwright install chromium"
+  },
+  "keywords": ["playwright", "google-maps", "address-extraction"],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "dependencies": {
+    "playwright": "^1.52.0",
+    "@playwright/test": "^1.40.0",
+    "csv-parser": "^3.0.0",
+    "csv-writer": "^1.6.0",
+    "ts-node": "^10.9.1",
+    "typescript": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0"
+  }
+}
